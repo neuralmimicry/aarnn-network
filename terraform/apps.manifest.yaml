@@ -1,0 +1,41 @@
+# Apps manifest: declare repositories to clone/build/deploy
+# This single file is the source of truth for what gets built and run.
+# You can add more entries under apps to include additional repositories.
+#
+# Schema (per app):
+# - name: short identifier (used in image and container names)
+# - repo: git clone URL
+# - ref: git ref (branch, tag, or commit)
+# - type: one of [aeron, aarnn, generic]
+# - port: optional container port to expose (only for local docker/podman target)
+# - cmd: optional command to run in the container (array of strings)
+# - env: optional map of environment variables
+# - health_path: optional HTTP path for healthchecks (default: /health when port is set)
+#
+# Notes:
+# - Aeron and AARNN remain first-class; their refs will override variables if provided here.
+# - For Kubernetes target, only Aeron/AARNN are wired today. Generic apps are built/run locally; k8s support can be extended later.
+
+apps:
+  - name: aeron
+    repo: https://github.com/aeron-io/aeron.git
+    ref: master
+    type: aeron
+
+  - name: aarnn
+    repo: https://github.com/neuralmimicry/aarnn.git
+    ref: main
+    type: aarnn
+    port: 8080
+    health_path: /health
+
+  # Example of adding another Python service
+  # - name: mysvc
+  #   repo: https://github.com/example/my-python-svc.git
+  #   ref: main
+  #   type: generic
+  #   port: 8081
+  #   cmd: ["bash","-lc","python -m mysvc"]
+  #   env:
+  #     SOME_FLAG: "1"
+  #     LOG_LEVEL: "info"

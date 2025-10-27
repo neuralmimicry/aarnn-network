@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1.7-labs
+# Generic multi-stage build for git-based apps
+
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE} AS base
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates curl bash build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Clone the specified repo/ref
+ARG REPO_URL
+ARG GIT_REF
+RUN git clone $${REPO_URL} . && \
+    git fetch --all --tags && \
+    (git checkout $${GIT_REF} || echo "Using default branch")
+
+# Try common Python builds first; otherwise leave artifacts as-is.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ -f pyproject.toml ]; then \
+      pip install -U pip build && python -m build --wheel && pip install dist/*.whl || true; \
+    elif [ -f requirements.txt ]; then \
+      pip install -U pip && pip install -r requirements.txt || true; \
+    elif [ -f setup.py ]; then \
+      pip install -U pip && pip install . || true; \
+    else \
+      echo "No Python build metadata; proceeding"; \
+    fi
+
+# Minimal fallback health server (used when no app cmd provided)
+COPY <<'PY' /app/.health/health_app.py
+import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+if __name__ == '__main__':
+    port = int(os.getenv('PORT', '8080'))
+    HTTPServer(('0.0.0.0', port), H).serve_forever()
+PY
+
+EXPOSE 8080
+
+# Default entrypoint is bash; command can be overridden by the container definition
+ENTRYPOINT ["bash", "-lc"]
+# Default CMD: run fallback health server
+CMD ["python", "/app/.health/health_app.py"]

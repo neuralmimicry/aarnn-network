@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.7-labs
+# Multi-stage build for Aeron
+
+FROM eclipse-temurin:21-jdk AS build
+
+# Install required tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git maven ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Clone specific ref for Aeron
+ARG AERON_REF="${aeron_git_ref}"
+RUN --mount=type=cache,target=/root/.m2 \
+    git clone https://github.com/aeron-io/aeron.git && \
+    cd aeron && \
+    git fetch --all --tags && \
+    git checkout "$AERON_REF" && \
+    ./gradlew --no-daemon :aeron-all:build && \
+    mkdir -p /out && \
+    cp ./aeron-all/build/libs/aeron-all-*.jar /out/aeron-all.jar || \
+    { echo "Falling back to maven build"; mvn -q -DskipTests package; cp ./aeron-all/target/aeron-all-*.jar /out/aeron-all.jar; }
+
+FROM eclipse-temurin:21-jre AS runtime
+LABEL org.opencontainers.image.source="https://github.com/aeron-io/aeron" \
+      org.opencontainers.image.description="Aeron runtime with Media Driver"
+
+RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /
+COPY --from=build /out/aeron-all.jar /aeron/aeron-all.jar
+
+# Default command can be overridden by container definition
+ENTRYPOINT ["bash", "-lc"]
+CMD ["java", "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED", "-cp", "/aeron/aeron-all.jar", "io.aeron.driver.MediaDriver"]
