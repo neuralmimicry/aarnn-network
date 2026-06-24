@@ -34,6 +34,99 @@ locals {
   extra_apps_k8s = [for a in local.extra_apps : a if try(a.image != null && length(trim(a.image)) > 0, false)]
 }
 
+# Optional: build local images for Kubernetes and load into kind
+# This enables a registry-less workflow when using kind. Requires Docker daemon.
+resource "local_file" "aeron_dockerfile_k8s" {
+  count    = var.deployment_target == "kubernetes" && var.build_k8s_local_images ? 1 : 0
+  filename = "${path.module}/.generated/Dockerfile.aeron.k8s"
+  content  = templatefile("${path.module}/modules/local-apps/templates/Dockerfile.aeron.tftpl", {
+    aeron_git_ref = local.aeron_ref
+  })
+}
+
+resource "local_file" "aarnn_dockerfile_k8s" {
+  count    = var.deployment_target == "kubernetes" && var.build_k8s_local_images ? 1 : 0
+  filename = "${path.module}/.generated/Dockerfile.aarnn.k8s"
+  content  = templatefile("${path.module}/modules/local-apps/templates/Dockerfile.aarnn.k8s.tftpl", {
+    aarnn_git_ref = local.aarnn_ref
+  })
+}
+
+resource "docker_image" "aeron_k8s" {
+  count = var.deployment_target == "kubernetes" && var.build_k8s_local_images ? 1 : 0
+  name  = local.aeron_image_name
+  build {
+    context     = path.module
+    dockerfile  = local_file.aeron_dockerfile_k8s[0].filename
+    pull_parent = true
+    no_cache    = false
+    platform    = var.target_arch != null ? "linux/${var.target_arch}" : ""
+  }
+  timeouts { create = "30m" }
+}
+
+resource "docker_image" "aarnn_k8s" {
+  count = var.deployment_target == "kubernetes" && var.build_k8s_local_images ? 1 : 0
+  name  = local.aarnn_image_name
+  build {
+    context     = path.module
+    dockerfile  = local_file.aarnn_dockerfile_k8s[0].filename
+    pull_parent = true
+    no_cache    = false
+    platform    = var.target_arch != null ? "linux/${var.target_arch}" : ""
+  }
+  timeouts { create = "45m" }
+}
+
+# Attempt to auto-load local images into kind when targeting Kubernetes with a kind-* context and no image overrides
+resource "null_resource" "kind_load_images" {
+  # Ensure images are built first when we opted to build locally for K8s
+  # depends_on must be a static list of references; referencing resources with count=0 is allowed
+  depends_on = [
+    docker_image.aeron_k8s,
+    docker_image.aarnn_k8s
+  ]
+
+  # Use triggers to ensure this re-evaluates when relevant inputs change
+  triggers = {
+    deployment_target   = var.deployment_target
+    kubeconfig_context  = var.kubeconfig_context != null ? var.kubeconfig_context : ""
+    aeron_override      = var.aeron_image_override != null ? var.aeron_image_override : ""
+    aarnn_override      = var.aarnn_image_override != null ? var.aarnn_image_override : ""
+    aeron_local_image   = local.aeron_image_name
+    aarnn_local_image   = local.aarnn_image_name
+  }
+
+  provisioner "local-exec" {
+    when    = create
+    command = <<-EOC
+      set -e
+      # Only act for Kubernetes target with a kind-* context and when no image overrides are set
+      if [ "$DEPLOYMENT_TARGET" = "kubernetes" ] && echo "$KUBECONTEXT" | grep -q '^kind-'; then
+        if [ -z "$AERON_OVERRIDE" ] && [ -z "$AARNN_OVERRIDE" ]; then
+          KIND_NAME="$${KUBECONTEXT#kind-}"
+          echo "Attempting to load local images into kind cluster '$${KIND_NAME}'..."
+          # Load Aeron image if available in Docker
+          kind load docker-image ${local.aeron_image_name}:latest --name "$KIND_NAME" || echo "Note: could not load ${local.aeron_image_name}:latest into kind (image may be missing in Docker daemon)."
+          # Load AARNN image if available in Docker
+          kind load docker-image ${local.aarnn_image_name}:latest --name "$KIND_NAME" || echo "Note: could not load ${local.aarnn_image_name}:latest into kind (image may be missing in Docker daemon)."
+        else
+          echo "Image overrides provided; skipping kind image load."
+        fi
+      else
+        echo "Not a kind Kubernetes target or context not set; skipping kind image load."
+      fi
+    EOC
+    interpreter = ["/bin/sh", "-c"]
+    environment = {
+      DEPLOYMENT_TARGET = var.deployment_target
+      KUBECONTEXT       = var.kubeconfig_context != null ? var.kubeconfig_context : ""
+      AERON_OVERRIDE    = var.aeron_image_override != null ? var.aeron_image_override : ""
+      AARNN_OVERRIDE    = var.aarnn_image_override != null ? var.aarnn_image_override : ""
+    }
+  }
+}
+
 module "local_apps" {
   source = "./modules/local-apps"
 
@@ -73,6 +166,9 @@ module "local_monitoring" {
 module "k8s_apps" {
   source = "./modules/k8s-apps"
   count  = var.deployment_target == "kubernetes" ? 1 : 0
+  depends_on = [
+    null_resource.kind_load_images
+  ]
 
   project_name            = var.project_name
   namespace               = var.k8s_namespace

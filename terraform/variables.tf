@@ -120,6 +120,15 @@ variable "enable_local_containers" {
   default     = true
 }
 
+# When targeting Kubernetes, optionally build Aeron/AARNN images locally (using the Docker provider)
+# and make them available to kind via 'kind load'. This is useful for offline/local development
+# without pushing to a registry. Requires Docker (kind uses the Docker daemon).
+variable "build_k8s_local_images" {
+  description = "When deployment_target is 'kubernetes', also build local Aeron/AARNN images to be loaded into kind."
+  type        = bool
+  default     = false
+}
+
 variable "enable_monitoring" {
   description = "Enable Prometheus/Grafana monitoring stack"
   type        = bool

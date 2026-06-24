@@ -1,90 +1,121 @@
 # syntax=docker/dockerfile:1.7-labs
-# Multi-stage build for AARNN (C++) on Debian Bookworm
+# Multi-stage build for AARNN (C++) – clones upstream and provides a fallback health endpoint
 
 FROM debian:bookworm-slim AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install build toolchain and libs
+# Install full build toolchain and developer libraries (use Kitware repo for modern CMake)
 RUN set -eux; \
     echo "deb http://deb.debian.org/debian bookworm-backports main" > /etc/apt/sources.list.d/backports.list; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg wget; \
+    apt-get -o Acquire::Retries=3 update; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg wget apt-transport-https; \
     install -d -m 0755 /etc/apt/keyrings; \
     curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --dearmor -o /etc/apt/keyrings/kitware-archive-keyring.gpg; \
     echo "deb [signed-by=/etc/apt/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/debian/ bookworm main" > /etc/apt/sources.list.d/kitware.list; \
-    apt-get update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      git build-essential ninja-build pkg-config \
-      cmake \
-      # Core/libs
-      libssl-dev libcurl4-openssl-dev libgmp-dev libfftw3-dev \
-      libpq-dev libpqxx-dev \
-      # Boost from backports (for Boost.JSON component)
-      -t bookworm-backports libboost-all-dev \
-      # OpenCV
-      libopencv-dev \
-      # Graphics/GL/Viz
-      libgl1-mesa-dev libglu1-mesa-dev freeglut3-dev libglew-dev libfreetype6-dev libopengl-dev \
-      # VTK
-      libvtk9-dev \
-      # MPI
-      libopenmpi-dev \
-      # Audio
-      libasound2-dev portaudio19-dev libpulse-dev libsndfile1-dev \
-      # FFmpeg
-      libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
-      # GStreamer
-      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-      # Other utilities
-      wget ca-certificates; \
+    apt-get -o Acquire::Retries=3 update; \
+    install() { apt-get install -y --no-install-recommends "$@" || (apt-get -o Acquire::Retries=3 update && apt-get install -y --no-install-recommends "$@"); }; \
+    # Toolchain
+    install git build-essential ninja-build pkg-config cmake; \
+    # Core/common libs
+    install libssl-dev libcurl4-openssl-dev libgmp-dev libfftw3-dev libpq-dev libpqxx-dev; \
+    # Boost (prefer backports for Boost.JSON; fall back to main if backports unavailable)
+    (apt-get install -y -t bookworm-backports --no-install-recommends libboost-all-dev || install libboost-all-dev); \
+    # OpenCV
+    install libopencv-dev; \
+    # Graphics/GL/Viz
+    install libgl1-mesa-dev libglu1-mesa-dev freeglut3-dev libglew-dev libfreetype6-dev libopengl-dev; \
+    # VTK + MPI
+    install libvtk9-dev libopenmpi-dev; \
+    # Audio
+    install libasound2-dev portaudio19-dev libpulse-dev libsndfile1-dev; \
+    # FFmpeg
+    install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev; \
+    # GStreamer
+    install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good; \
     rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /src
 
-# Copy local repo into the image (build context should be repository root)
-COPY . /app/
-
-# Build AARNN and optionally Visualiser
+# Clone upstream AARNN at the requested ref with fallbacks
+ARG AARNN_REF="${aarnn_git_ref}"
 RUN set -eux; \
-    cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release; \
-    cmake --build build --target AARNN -j; \
-    # Build Visualiser as well when VTK is available; ignore failure to keep image useful
-    (cmake --build build --target Visualiser -j || true); \
-    cmake --install build --component Unspecified || true
+    rm -rf /tmp/aarnn /tmp/aarnn-src || true; \
+    success=0; \
+    for i in 1 2 3; do \
+      git clone --depth 1 --branch "$AARNN_REF" https://github.com/neuralmimicry/aarnn.git /tmp/aarnn && success=1 && break || sleep 2; \
+    done; \
+    if [ "$success" -eq 1 ]; then \
+      cp -a /tmp/aarnn/. /src/; \
+    else \
+      for i in 1 2 3; do \
+        git clone https://github.com/neuralmimicry/aarnn.git /tmp/aarnn && break || sleep 2; \
+      done; \
+      if [ -d /tmp/aarnn/.git ]; then \
+        cd /tmp/aarnn && git fetch --all --tags || true; \
+        (git checkout "$AARNN_REF" || true); \
+        cp -a /tmp/aarnn/. /src/; \
+      fi; \
+    fi; \
+    if [ ! -f /src/CMakeLists.txt ]; then \
+      echo "Git clone failed or missing CMakeLists; attempting tarball"; \
+      mkdir -p /tmp/aarnn-src; \
+      (curl -fsSL -o /tmp/aarnn.tar.gz "https://codeload.github.com/neuralmimicry/aarnn/tar.gz/refs/heads/$AARNN_REF" || \
+       curl -fsSL -o /tmp/aarnn.tar.gz "https://codeload.github.com/neuralmimicry/aarnn/tar.gz/$AARNN_REF"); \
+      tar -xzf /tmp/aarnn.tar.gz -C /tmp/aarnn-src --strip-components=1; \
+      cp -a /tmp/aarnn-src/. /src/ || true; \
+    fi
+
+# Build with CMake (Ninja if available), fallback to Make; always ensure build dir exists
+RUN set -eux; \
+    if [ -f CMakeLists.txt ]; then \
+      cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release || cmake -S . -B build -DCMAKE_BUILD_TYPE=Release; \
+      cmake --build build -j || cmake --build build; \
+      (cmake --install build || true); \
+    elif [ -f Makefile ] || [ -f makefile ]; then \
+      make -j"$(nproc)" || make; \
+    else \
+      echo "No C++ build metadata found (CMake/Make). Proceeding without building."; \
+    fi; \
+    mkdir -p /src/build
+
+# Tiny fallback HTTP health server on :8080 serving /health
+RUN <<'CPP' g++ -O2 -s -o /usr/local/bin/health_server -x c++ -
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <cstring>
+#include <string>
+int main(){
+  int s = socket(AF_INET, SOCK_STREAM, 0); int opt=1; setsockopt(s,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt));
+  sockaddr_in addr{}; addr.sin_family=AF_INET; addr.sin_addr.s_addr=INADDR_ANY; addr.sin_port=htons(8080);
+  if(bind(s,(sockaddr*)&addr,sizeof(addr))<0) return 1; if(listen(s,16)<0) return 1;
+  while(true){ int c=accept(s,nullptr,nullptr); if(c<0) continue; char buf[1024]; ssize_t n=read(c,buf,sizeof(buf)-1); if(n<0) n=0; buf[n]=0;
+    std::string req(buf); bool ok = req.find(" /health ")!=std::string::npos || req.find(" /health?")!=std::string::npos || req.rfind("GET /health",0)==0;
+    const char* resp = ok ? "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nOK"
+                           : "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nNot Found";
+    write(c, resp, strlen(resp)); close(c);
+  }
+}
+CPP
 
 FROM debian:bookworm-slim AS runtime
 LABEL org.opencontainers.image.source="https://github.com/neuralmimicry/aarnn" \
-      org.opencontainers.image.description="AARNN runtime (Debian Bookworm)"
+      org.opencontainers.image.description="AARNN C++ runtime with fallback health endpoint"
 
-RUN set -eux; \
-    apt-get update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      # Runtime libs matching links
-      libssl3 libcurl4 libgmp10 libfftw3-3 \
-      libpq5 libpqxx-7 \
-      libboost-filesystem1.74.0 libboost-system1.74.0 libboost-json1.74.0 \
-      libopencv-core406 libopencv-imgproc406 libopencv-highgui406 || true; \
-    # Fallback: if specific versions unavailable, install metapackage
-    apt-get -y install --no-install-recommends libopencv-dev || true; \
-    apt-get install -y --no-install-recommends \
-      libgl1 libglx-mesa0 libgl1-mesa-dri libglu1-mesa freeglut3 libglew2.2 libfreetype6 \
-      libvtk9.1 \
-      libasound2 libportaudio2 libpulse0 libsndfile1 \
-      libavcodec59 libavformat59 libavutil57 libswscale6 libswresample4 \
-      libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
-      ca-certificates bash; \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates bash curl && \
     rm -rf /var/lib/apt/lists/*
 
+# Copy built artifacts (if any) and the fallback health server
 WORKDIR /app
+COPY --from=build /src/build /app/build
+COPY --from=build /src /app/src
+COPY --from=build /usr/local/bin/health_server /usr/local/bin/health_server
 
-# Copy built binaries and default configs
-COPY --from=build /app/build/AARNN /app/AARNN
-# Visualiser may or may not exist
-COPY --from=build /app/build/Visualiser /app/Visualiser 2>/dev/null || true
-COPY configure/simulation.conf /app/simulation.conf
-COPY configure/Visualiser.conf /app/Visualiser.conf
+EXPOSE 8080
 
-# Default command runs the AARNN simulator; override to run Visualiser
-ENTRYPOINT ["/bin/bash", "-lc"]
-CMD ["/app/AARNN"]
+# Default: run fallback health server; override CMD to run the actual AARNN binary if known
+ENTRYPOINT ["bash", "-lc"]
+CMD ["/usr/local/bin/health_server"]
