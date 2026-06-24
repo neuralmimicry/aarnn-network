@@ -54,12 +54,34 @@ Podman
 
 Kubernetes (kind/minikube or any kubeconfig)
 1) Have a cluster and kubeconfig ready (e.g., kind create cluster --name aarnn)
-2) cd terraform && terraform init
-3) terraform apply -var-file=examples/k8s-kind.tfvars
-4) If using local images and a local cluster, load images:
+2) Set kubeconfig context to your cluster. For kind, it is usually kind-aarnn. Either export TF_VAR_kubeconfig_context=kind-aarnn, or edit terraform/examples/k8s-kind.tfvars and set kubeconfig_context = "kind-aarnn".
+3) cd terraform && terraform init
+4) terraform apply -var-file=examples/k8s-kind.tfvars
+5) If using local images and a local cluster, load images into kind (before or after apply):
    kind load docker-image aeron-local:latest --name aarnn
    kind load docker-image aarnn-local:latest --name aarnn
-5) Access AARNN via Service <project_name>-aarnn in namespace k8s_namespace (ClusterIP by default). For NodePort/LoadBalancer, set k8s_service_type.
+6) Access AARNN via Service <project_name>-aarnn in namespace k8s_namespace (ClusterIP by default). For NodePort/LoadBalancer, set k8s_service_type.
+
+Auto-loading images into kind:
+- When deployment_target = kubernetes and kubeconfig_context starts with "kind-", Terraform will attempt to run `kind load docker-image aeron-local:latest` and `aarnn-local:latest` for the detected kind cluster name, if no image overrides are set.
+- Requirements: the images must exist in your local Docker daemon (kind uses Docker). If you built with Podman, rebuild images with Docker or push to a registry and set the image override vars.
+
+Build images for Kubernetes (no registry):
+- Set build_k8s_local_images = true to have Terraform build Aeron and AARNN images locally even when deployment_target = kubernetes, and then auto-load them into kind (when kubeconfig_context starts with kind-).
+- This enables a fully local workflow without pushing to a registry. Note: kind uses the Docker daemon; ensure Docker is available (not Podman) for this step.
+- Alternatively, push images to a registry and set aeron_image_override / aarnn_image_override.
+
+Troubleshooting (Kubernetes):
+- Error like "no route to host" or API server 192.168.x.x unreachable usually indicates kubectl/terraform are pointing at the wrong context/cluster. Run kubectl config get-contexts and set TF_VAR_kubeconfig_context to the intended one (e.g., kind-aarnn), or update kubeconfig_context in your tfvars.
+- Error: Provider configuration: cannot load Kubernetes client config / context "kind-aarnn" does not exist
+  - Cause: the kind cluster was created as root (using sudo), so its kubeconfig context was written to /root/.kube/config and is invisible to your user’s ~/.kube/config.
+  - Fix option A (recommended): export the kind kubeconfig into your user config:
+    kind export kubeconfig --name aarnn --kubeconfig ~/.kube/config
+    Then ensure kubeconfig_context = "kind-aarnn" (see examples/k8s-kind.tfvars) or run: kubectl config use-context kind-aarnn
+  - Fix option B: explicitly point Terraform at the kubeconfig that actually contains the context:
+    - Set TF_VAR_kubeconfig_path=/root/.kube/config (if running terraform with sudo -E) or
+    - In your tfvars, set kubeconfig_path = "/root/.kube/config" (only when appropriate). Avoid mixing sudo and non-sudo between kind and terraform.
+- General tip: avoid sudo for kind and Terraform. Prefer rootless Docker/Podman and kind so contexts land in ~/.kube/config.
 
 Container Details
 - Aeron container
