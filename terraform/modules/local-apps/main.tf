@@ -21,7 +21,7 @@ resource "docker_network" "app" {
 resource "local_file" "aeron_dockerfile" {
   count    = var.enabled ? 1 : 0
   filename = "${path.module}/.generated/Dockerfile.aeron"
-  content  = templatefile("${path.module}/templates/Dockerfile.aeron.tftpl", {
+  content = templatefile("${path.module}/templates/Dockerfile.aeron.tftpl", {
     aeron_git_ref = var.aeron_git_ref
   })
 }
@@ -36,6 +36,7 @@ resource "docker_image" "aeron" {
     dockerfile  = local_file.aeron_dockerfile[0].filename
     no_cache    = false
     pull_parent = true
+    build_args  = { TARGET_PAGE_SIZE = var.target_page_size }
     platform    = var.target_arch != null ? "linux/${var.target_arch}" : ""
   }
 
@@ -49,7 +50,7 @@ resource "docker_image" "aeron" {
 resource "local_file" "aarnn_dockerfile" {
   count    = var.enabled ? 1 : 0
   filename = "${path.module}/.generated/Dockerfile.aarnn"
-  content  = templatefile("${path.module}/templates/Dockerfile.aarnn.tftpl", {
+  content = templatefile("${path.module}/templates/Dockerfile.aarnn.tftpl", {
     aarnn_git_ref = var.aarnn_git_ref
   })
 }
@@ -63,7 +64,7 @@ resource "docker_image" "aarnn" {
     context     = path.module
     dockerfile  = local_file.aarnn_dockerfile[0].filename
     no_cache    = false
-    build_args  = {}
+    build_args  = { TARGET_PAGE_SIZE = var.target_page_size }
     pull_parent = true
     platform    = var.target_arch != null ? "linux/${var.target_arch}" : ""
   }
@@ -165,7 +166,7 @@ resource "local_file" "generic_dockerfile" {
   for_each = var.enabled ? local.extra_map : {}
 
   filename = "${path.module}/.generated/Dockerfile.${each.key}"
-  content  = templatefile("${path.module}/templates/Dockerfile.generic.tftpl", {
+  content = templatefile("${path.module}/templates/Dockerfile.generic.tftpl", {
     BASE_IMAGE = "python:3.11-slim"
   })
 }
@@ -181,8 +182,9 @@ resource "docker_image" "extra" {
     no_cache    = false
     pull_parent = true
     build_args = {
-      REPO_URL = each.value["repo"]
-      GIT_REF  = each.value["ref"]
+      REPO_URL         = each.value["repo"]
+      GIT_REF          = each.value["ref"]
+      TARGET_PAGE_SIZE = var.target_page_size
     }
   }
 
@@ -190,7 +192,7 @@ resource "docker_image" "extra" {
 }
 
 locals {
-  extra_env_lists = { for k, v in local.extra_map : k => [for ek, ev in try(v["env"], {}) : "${ek}=${ev}"] }
+  extra_env_lists    = { for k, v in local.extra_map : k => [for ek, ev in try(v["env"], {}) : "${ek}=${ev}"] }
   extra_health_paths = { for k, v in local.extra_map : k => coalesce(try(v["health_path"], null), "/health") }
 }
 

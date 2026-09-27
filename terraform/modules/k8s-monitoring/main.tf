@@ -22,7 +22,7 @@ resource "helm_release" "kube_prometheus_stack" {
   values = [
     yamlencode({
       grafana = {
-        adminUser = var.grafana_admin_user
+        adminUser     = var.grafana_admin_user
         adminPassword = local.grafana_pass
         service = {
           type = var.service_type
@@ -62,7 +62,7 @@ resource "helm_release" "loki_stack" {
       }
       loki = {
         isDefault = true
-        service = { type = var.service_type }
+        service   = { type = var.service_type }
       }
     })
   ]

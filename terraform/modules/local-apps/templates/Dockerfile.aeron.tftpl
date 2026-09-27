@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7-labs
 # Multi-stage build for Aeron
 
+ARG TARGET_PAGE_SIZE=4k
 FROM eclipse-temurin:21-jdk AS build
 
 # Install required tools
@@ -23,7 +24,9 @@ RUN --mount=type=cache,target=/root/.m2 \
     { echo "Falling back to maven build"; mvn -q -DskipTests package; cp ./aeron-all/target/aeron-all-*.jar /out/aeron-all.jar; }
 
 FROM eclipse-temurin:21-jre AS runtime
+ARG TARGET_PAGE_SIZE
 LABEL org.opencontainers.image.source="https://github.com/aeron-io/aeron" \
+      org.opencontainers.image.page-size="$${TARGET_PAGE_SIZE}" \
       org.opencontainers.image.description="Aeron runtime with Media Driver"
 
 RUN apt-get update && apt-get install -y --no-install-recommends bash ca-certificates && rm -rf /var/lib/apt/lists/*

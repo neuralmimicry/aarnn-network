@@ -73,13 +73,13 @@ variable "node_selector" {
 
 variable "tolerations" {
   description = "Optional list of tolerations for pods"
-  type        = list(object({
-    key = string
+  type = list(object({
+    key      = string
     operator = optional(string)
-    value = optional(string)
-    effect = optional(string)
+    value    = optional(string)
+    effect   = optional(string)
   }))
-  default     = []
+  default = []
 }
 
 # Additional generic apps for Kubernetes from manifest

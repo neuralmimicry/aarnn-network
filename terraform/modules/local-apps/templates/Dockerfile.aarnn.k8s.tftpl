@@ -1,39 +1,45 @@
 # syntax=docker/dockerfile:1.7-labs
-# Multi-stage build for AARNN (C++) – clones upstream and provides a fallback health endpoint
+# Kubernetes-local build for AARNN (C++) using Ubuntu 22.04 build base
+# - Full developer libraries installed (Boost, OpenCV, VTK, OpenMPI, FFmpeg, GStreamer, Audio)
+# - Robust apt retries to mitigate transient mirror issues
+# - Clones upstream repo at the requested ref, builds with CMake/Make
+# - Ships a tiny fallback HTTP server serving /health on :8080
 
 ARG TARGET_PAGE_SIZE=4k
-FROM debian:bookworm-slim AS build
+FROM ubuntu:22.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install full build toolchain and developer libraries (use Kitware repo for modern CMake)
+# Install full toolchain + developer libraries with retries
 RUN set -eux; \
-    echo "deb http://deb.debian.org/debian bookworm-backports main" > /etc/apt/sources.list.d/backports.list; \
     apt-get -o Acquire::Retries=3 update; \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg wget apt-transport-https; \
-    install -d -m 0755 /etc/apt/keyrings; \
-    curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --dearmor -o /etc/apt/keyrings/kitware-archive-keyring.gpg; \
-    echo "deb [signed-by=/etc/apt/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/debian/ bookworm main" > /etc/apt/sources.list.d/kitware.list; \
-    apt-get -o Acquire::Retries=3 update; \
-    install() { apt-get install -y --no-install-recommends "$@" || (apt-get -o Acquire::Retries=3 update && apt-get install -y --no-install-recommends "$@"); }; \
-    # Toolchain
-    install git build-essential ninja-build pkg-config cmake; \
+    # Base tools and certs
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl wget gnupg software-properties-common \
+      build-essential ninja-build pkg-config cmake git; \
     # Core/common libs
-    install libssl-dev libcurl4-openssl-dev libgmp-dev libfftw3-dev libpq-dev libpqxx-dev; \
-    # Boost (prefer backports for Boost.JSON; fall back to main if backports unavailable)
-    (apt-get install -y -t bookworm-backports --no-install-recommends libboost-all-dev || install libboost-all-dev); \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+      libssl-dev libcurl4-openssl-dev libgmp-dev libfftw3-dev \
+      libpq-dev libpqxx-dev; \
+    # Boost (Ubuntu jammy provides 1.74 with Boost.JSON headers)
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends libboost-all-dev; \
     # OpenCV
-    install libopencv-dev; \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends libopencv-dev; \
     # Graphics/GL/Viz
-    install libgl1-mesa-dev libglu1-mesa-dev freeglut3-dev libglew-dev libfreetype6-dev libopengl-dev; \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+      libgl1-mesa-dev libglu1-mesa-dev freeglut3-dev libglew-dev libfreetype6-dev; \
     # VTK + MPI
-    install libvtk9-dev libopenmpi-dev; \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends libvtk9-dev libopenmpi-dev; \
     # Audio
-    install libasound2-dev portaudio19-dev libpulse-dev libsndfile1-dev; \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+      libasound2-dev portaudio19-dev libpulse-dev libsndfile1-dev; \
     # FFmpeg
-    install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev; \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+      libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev; \
     # GStreamer
-    install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good; \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+      libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good; \
+    # Cleanup lists to keep layer smaller
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -61,10 +67,23 @@ RUN set -eux; \
     if [ ! -f /src/CMakeLists.txt ]; then \
       echo "Git clone failed or missing CMakeLists; attempting tarball"; \
       mkdir -p /tmp/aarnn-src; \
-      (curl -fsSL -o /tmp/aarnn.tar.gz "https://codeload.github.com/neuralmimicry/aarnn/tar.gz/refs/heads/$AARNN_REF" || \
-       curl -fsSL -o /tmp/aarnn.tar.gz "https://codeload.github.com/neuralmimicry/aarnn/tar.gz/$AARNN_REF"); \
-      tar -xzf /tmp/aarnn.tar.gz -C /tmp/aarnn-src --strip-components=1; \
-      cp -a /tmp/aarnn-src/. /src/ || true; \
+      success_tar=0; \
+      for i in 1 2 3; do \
+        if curl -fsSL -o /tmp/aarnn.tar.gz "https://codeload.github.com/neuralmimicry/aarnn/tar.gz/refs/heads/$AARNN_REF"; then success_tar=1; break; fi; \
+        sleep 2; \
+      done; \
+      if [ "$success_tar" -ne 1 ]; then \
+        for i in 1 2 3; do \
+          if curl -fsSL -o /tmp/aarnn.tar.gz "https://codeload.github.com/neuralmimicry/aarnn/tar.gz/$AARNN_REF"; then success_tar=1; break; fi; \
+          sleep 2; \
+        done; \
+      fi; \
+      if [ "$success_tar" -eq 1 ] && [ -s /tmp/aarnn.tar.gz ]; then \
+        tar -xzf /tmp/aarnn.tar.gz -C /tmp/aarnn-src --strip-components=1 || true; \
+        cp -a /tmp/aarnn-src/. /src/ || true; \
+      else \
+        echo "Tarball fetch failed; proceeding without upstream sources"; \
+      fi; \
     fi
 
 # Build with CMake (Ninja if available), fallback to Make; always ensure build dir exists
@@ -101,13 +120,13 @@ int main(){
 }
 CPP
 
-FROM debian:bookworm-slim AS runtime
+FROM ubuntu:22.04 AS runtime
 ARG TARGET_PAGE_SIZE
 LABEL org.opencontainers.image.source="https://github.com/neuralmimicry/aarnn" \
       org.opencontainers.image.page-size="$${TARGET_PAGE_SIZE}" \
       org.opencontainers.image.description="AARNN C++ runtime with fallback health endpoint"
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=3 update && apt-get install -y --no-install-recommends \
     ca-certificates bash curl && \
     rm -rf /var/lib/apt/lists/*
 

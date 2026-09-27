@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform (${{ matrix.runner_arch }})
+    runs-on: [self-hosted, Linux, "${{ matrix.runner_arch }}"]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner_arch: [X64, ARM64]
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialize modules
+        run: terraform init -backend=false
+
+      - name: Validate configuration
+        run: terraform validate

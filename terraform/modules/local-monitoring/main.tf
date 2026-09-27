@@ -158,9 +158,9 @@ resource "docker_container" "cadvisor" {
   # cAdvisor requires access to docker host paths; when using rootless podman, this may not work.
   # This setup targets standard Docker on Linux.
   mounts {
-    target = "/rootfs"
-    source = "/"
-    type   = "bind"
+    target    = "/rootfs"
+    source    = "/"
+    type      = "bind"
     read_only = true
   }
   mounts {
@@ -223,9 +223,9 @@ resource "docker_container" "prometheus" {
   networks_advanced { name = var.network_name }
 
   mounts {
-    target = "/etc/prometheus/prometheus.yml"
-    source = abspath(local_file.prometheus_yml[0].filename)
-    type   = "bind"
+    target    = "/etc/prometheus/prometheus.yml"
+    source    = abspath(local_file.prometheus_yml[0].filename)
+    type      = "bind"
     read_only = true
   }
 
@@ -276,9 +276,9 @@ resource "docker_container" "grafana" {
   ]
 
   mounts {
-    target = "/etc/grafana/provisioning/datasources/prometheus.yml"
-    source = abspath(local_file.grafana_datasource[0].filename)
-    type   = "bind"
+    target    = "/etc/grafana/provisioning/datasources/prometheus.yml"
+    source    = abspath(local_file.grafana_datasource[0].filename)
+    type      = "bind"
     read_only = true
   }
 
@@ -328,9 +328,9 @@ resource "docker_container" "loki" {
   networks_advanced { name = var.network_name }
 
   mounts {
-    target = "/etc/loki/config.yml"
-    source = local_file.loki_config[0].filename
-    type   = "bind"
+    target    = "/etc/loki/config.yml"
+    source    = local_file.loki_config[0].filename
+    type      = "bind"
     read_only = true
   }
 
@@ -372,9 +372,9 @@ resource "docker_container" "promtail" {
   networks_advanced { name = var.network_name }
 
   mounts {
-    target = "/etc/promtail/config.yml"
-    source = local_file.promtail_config[0].filename
-    type   = "bind"
+    target    = "/etc/promtail/config.yml"
+    source    = local_file.promtail_config[0].filename
+    type      = "bind"
     read_only = true
   }
 

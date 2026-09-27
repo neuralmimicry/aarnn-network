@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1.7-labs
 # Generic multi-stage build for git-based apps
 
+ARG TARGET_PAGE_SIZE=4k
 ARG BASE_IMAGE=python:3.11-slim
 FROM ${BASE_IMAGE} AS base
+ARG TARGET_PAGE_SIZE
+LABEL org.opencontainers.image.page-size="$${TARGET_PAGE_SIZE}"
 
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \

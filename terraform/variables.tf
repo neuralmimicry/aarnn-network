@@ -230,13 +230,13 @@ variable "node_selector" {
 
 variable "tolerations" {
   description = "Kubernetes tolerations applied to app pods"
-  type        = list(object({
-    key = string
+  type = list(object({
+    key      = string
     operator = optional(string)
-    value = optional(string)
-    effect = optional(string)
+    value    = optional(string)
+    effect   = optional(string)
   }))
-  default     = []
+  default = []
 }
 
 variable "aeron_image_override" {
@@ -281,6 +281,16 @@ variable "target_arch" {
   validation {
     condition     = var.target_arch == null || try(contains(["amd64", "arm64"], var.target_arch), false)
     error_message = "target_arch must be one of: amd64, arm64, or null."
+  }
+}
+
+variable "target_page_size" {
+  description = "Container page-size variant for local builds (4k or 64k-hwe)."
+  type        = string
+  default     = "4k"
+  validation {
+    condition     = contains(["4k", "64k-hwe"], var.target_page_size)
+    error_message = "target_page_size must be 4k or 64k-hwe."
   }
 }
 
