@@ -36,8 +36,8 @@ provider "docker" {
 
 provider "kubernetes" {
   # Generic Kubernetes config; used only when deployment_target == "kubernetes"
-  config_path       = coalesce(var.kubeconfig_path, pathexpand("~/.kube/config"))
-  config_context    = var.kubeconfig_context
+  config_path              = coalesce(var.kubeconfig_path, pathexpand("~/.kube/config"))
+  config_context           = var.kubeconfig_context
   config_context_auth_info = null
 }
 

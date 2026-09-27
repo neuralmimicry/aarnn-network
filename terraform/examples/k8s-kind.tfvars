@@ -24,8 +24,8 @@ build_k8s_local_images = true
 kubeconfig_path    = "~/.kube/config"
 kubeconfig_context = "kind-aarnn"
 
-k8s_namespace     = "aarnn"
-k8s_service_type  = "ClusterIP"
+k8s_namespace    = "aarnn"
+k8s_service_type = "ClusterIP"
 
 enable_monitoring = true
 enable_logging    = true

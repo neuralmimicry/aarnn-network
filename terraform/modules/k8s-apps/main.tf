@@ -11,7 +11,7 @@ locals {
 
 resource "kubernetes_namespace" "ns" {
   metadata {
-    name = var.namespace
+    name   = var.namespace
     labels = local.labels
   }
 }
@@ -46,8 +46,8 @@ resource "kubernetes_deployment" "aeron" {
         }
 
         container {
-          name  = "aeron"
-          image = var.aeron_image
+          name              = "aeron"
+          image             = var.aeron_image
           image_pull_policy = "IfNotPresent"
 
           resources {
@@ -105,8 +105,8 @@ resource "kubernetes_deployment" "aarnn" {
         }
 
         container {
-          name  = "aarnn"
-          image = var.aarnn_image
+          name              = "aarnn"
+          image             = var.aarnn_image
           image_pull_policy = "IfNotPresent"
 
           env {
@@ -228,8 +228,8 @@ resource "kubernetes_deployment" "extra" {
         }
 
         container {
-          name  = each.key
-          image = coalesce(try(each.value["image"], null), "")
+          name              = each.key
+          image             = coalesce(try(each.value["image"], null), "")
           image_pull_policy = "IfNotPresent"
 
           dynamic "env" {
