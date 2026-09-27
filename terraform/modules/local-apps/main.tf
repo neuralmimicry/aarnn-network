@@ -36,6 +36,7 @@ resource "docker_image" "aeron" {
     dockerfile  = local_file.aeron_dockerfile[0].filename
     no_cache    = false
     pull_parent = true
+    build_args  = { TARGET_PAGE_SIZE = var.target_page_size }
     platform    = var.target_arch != null ? "linux/${var.target_arch}" : ""
   }
 
@@ -63,7 +64,7 @@ resource "docker_image" "aarnn" {
     context     = path.module
     dockerfile  = local_file.aarnn_dockerfile[0].filename
     no_cache    = false
-    build_args  = {}
+    build_args  = { TARGET_PAGE_SIZE = var.target_page_size }
     pull_parent = true
     platform    = var.target_arch != null ? "linux/${var.target_arch}" : ""
   }
@@ -183,6 +184,7 @@ resource "docker_image" "extra" {
     build_args = {
       REPO_URL = each.value["repo"]
       GIT_REF  = each.value["ref"]
+      TARGET_PAGE_SIZE = var.target_page_size
     }
   }
 

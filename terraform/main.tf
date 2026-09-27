@@ -59,6 +59,7 @@ resource "docker_image" "aeron_k8s" {
     context     = path.module
     dockerfile  = local_file.aeron_dockerfile_k8s[0].filename
     pull_parent = true
+    build_args  = { TARGET_PAGE_SIZE = var.target_page_size }
     no_cache    = false
     platform    = var.target_arch != null ? "linux/${var.target_arch}" : ""
   }
@@ -72,6 +73,7 @@ resource "docker_image" "aarnn_k8s" {
     context     = path.module
     dockerfile  = local_file.aarnn_dockerfile_k8s[0].filename
     pull_parent = true
+    build_args  = { TARGET_PAGE_SIZE = var.target_page_size }
     no_cache    = false
     platform    = var.target_arch != null ? "linux/${var.target_arch}" : ""
   }
@@ -145,6 +147,7 @@ module "local_apps" {
   enable_gpu               = var.enable_gpu
   gpu_count                = var.gpu_count
   target_arch              = var.target_arch
+  target_page_size         = var.target_page_size
 }
 
 # Local monitoring stack (Prometheus + Grafana) when using docker/podman
@@ -215,4 +218,3 @@ module "k8s_harbor" {
   hostname       = var.harbor_hostname
   storage_class  = var.harbor_storage_class
 }
-

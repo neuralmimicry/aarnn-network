@@ -71,6 +71,16 @@ variable "target_arch" {
   default     = null
 }
 
+variable "target_page_size" {
+  description = "Container page-size variant for local builds (4k or 64k-hwe)."
+  type        = string
+  default     = "4k"
+  validation {
+    condition     = contains(["4k", "64k-hwe"], var.target_page_size)
+    error_message = "target_page_size must be 4k or 64k-hwe."
+  }
+}
+
 # Additional apps defined via the manifest; each object keys:
 # name (string), repo (string), ref (string), port (number|null), cmd (list(string)|null),
 # env (map(string)|null), health_path (string|null), type (string|null)

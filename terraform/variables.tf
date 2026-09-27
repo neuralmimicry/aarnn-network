@@ -284,6 +284,16 @@ variable "target_arch" {
   }
 }
 
+variable "target_page_size" {
+  description = "Container page-size variant for local builds (4k or 64k-hwe)."
+  type        = string
+  default     = "4k"
+  validation {
+    condition     = contains(["4k", "64k-hwe"], var.target_page_size)
+    error_message = "target_page_size must be 4k or 64k-hwe."
+  }
+}
+
 variable "aeron_git_ref" {
   description = "Git ref (branch, tag, or commit) to build for Aeron"
   type        = string
