@@ -20,6 +20,8 @@ WORKDIR /app
 # Clone the specified repo/ref
 ARG REPO_URL
 ARG GIT_REF
+LABEL org.opencontainers.image.source="$${REPO_URL}" \
+      org.opencontainers.image.vendor="NeuralMimicry"
 RUN git clone $${REPO_URL} . && \
     git fetch --all --tags && \
     (git checkout $${GIT_REF} || echo "Using default branch")
